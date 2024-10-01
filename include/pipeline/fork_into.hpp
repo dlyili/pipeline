@@ -14,7 +14,7 @@ public:
   fork_into(Fn first, Fns... fns) : fns_(first, fns...) {}
 
   template <typename... Args> decltype(auto) operator()(Args &&... args) {
-    typedef typename std::result_of<Fn(Args...)>::type result_type;
+	typedef typename std::invoke_result<Fn, Args...>::type result_type;
 
     std::vector<std::future<result_type>> futures;
 
