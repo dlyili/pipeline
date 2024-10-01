@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string>
 #include <pipeline/pipeline.hpp>
 using namespace pipeline;
 
