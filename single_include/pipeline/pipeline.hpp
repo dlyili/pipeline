@@ -55,6 +55,60 @@ template <typename... Ts, typename F> void for_each_in_tuple(std::tuple<Ts...> c
 } // namespace pipeline
 #pragma once
 // #include <pipeline/details.hpp>
+#include <tuple>
+
+namespace pipeline {
+
+template <typename T1, typename T2> class pipe_pair;
+
+template <typename Fn, typename... Fns> class fork_into;
+
+namespace details {
+
+// is_tuple constexpr check
+template <typename> struct is_tuple : std::false_type {};
+template <typename... T> struct is_tuple<std::tuple<T...>> : std::true_type {};
+
+template <typename Test, template <typename...> class Ref>
+struct is_specialization : std::false_type {};
+
+template <template <typename...> class Ref, typename... Args>
+struct is_specialization<Ref<Args...>, Ref> : std::true_type {};
+
+template <class F, size_t... Is> constexpr auto index_apply_impl(F f, std::index_sequence<Is...>) {
+  return f(std::integral_constant<size_t, Is>{}...);
+}
+
+template <size_t N, class F> constexpr auto index_apply(F f) {
+  return index_apply_impl(f, std::make_index_sequence<N>{});
+}
+
+// Unpacks Tuple into a parameter pack
+// Calls f(parameter_pack)
+template <class Tuple, class F> constexpr auto apply(Tuple t, F f) {
+  return index_apply<std::tuple_size<Tuple>{}>([&](auto... Is) { return f(std::get<Is>(t)...); });
+}
+
+template <size_t N, typename T> constexpr decltype(auto) make_repeated_tuple(T t) {
+  if constexpr (N == 1) {
+    return t;
+  } else {
+    return make_repeated_tuple<N - 1>(std::tuple_cat(std::make_tuple(std::get<0>(t)), t));
+  }
+}
+
+template <typename T, typename F, int... Is>
+void for_each(T &&t, F f, std::integer_sequence<int, Is...>) {
+  [[maybe_unused]] auto l = {(f(std::get<Is>(t)), 0)...};
+}
+
+template <typename... Ts, typename F> void for_each_in_tuple(std::tuple<Ts...> const &t, F f) {
+  for_each(t, f, std::make_integer_sequence<int, sizeof...(Ts)>());
+}
+
+} // namespace details
+
+} // namespace pipeline
 
 namespace pipeline {
 
@@ -79,6 +133,28 @@ public:
 #pragma once
 // #include <pipeline/details.hpp>
 // #include <pipeline/fn.hpp>
+// #include <pipeline/details.hpp>
+
+namespace pipeline {
+
+template <typename Fn> class fn {
+  Fn fn_;
+
+public:
+  fn(Fn fn) : fn_(fn) {}
+
+  template <typename... T> decltype(auto) operator()(T &&... args) { return fn_(args...); }
+
+  template <typename... A> static constexpr bool is_invocable_on() {
+    return std::is_invocable<Fn, A...>::value;
+  }
+
+  template <typename T> auto operator|(T &&rhs) {
+    return pipe_pair<fn<Fn>, T>(*this, std::forward<T>(rhs));
+  }
+};
+
+} // namespace pipeline
 #include <functional>
 
 namespace pipeline {
@@ -114,7 +190,7 @@ public:
   pipe_pair(T1 left, T2 right) : left_(left), right_(right) {}
 
   template <typename... T> decltype(auto) operator()(T &&... args) {
-    typedef typename std::result_of<T1(T...)>::type left_result_type;
+    typedef typename std::invoke_result<T1, T...>::type left_result_type;
 
     if constexpr (!std::is_same<left_result_type, void>::value) {
       return right_(left_(std::forward<T>(args)...));
@@ -154,7 +230,7 @@ public:
   fork_into(Fn first, Fns... fns) : fns_(first, fns...) {}
 
   template <typename... Args> decltype(auto) operator()(Args &&... args) {
-    typedef typename std::result_of<Fn(Args...)>::type result_type;
+	typedef typename std::invoke_result<Fn, Args...>::type result_type;
 
     std::vector<std::future<result_type>> futures;
 
@@ -201,7 +277,7 @@ public:
   for_each(Fn fn) : fn_(fn) {}
 
   template <typename Container> decltype(auto) operator()(Container &&args) {
-    typedef typename std::result_of<Fn(typename std::decay<Container>::type::value_type &)>::type result_type;
+	typedef typename std::invoke_result<Fn, typename std::decay<Container>::type::value_type&>::type result_type;
 
     if constexpr (std::is_same<result_type, void>::value) {
       // result type is void
